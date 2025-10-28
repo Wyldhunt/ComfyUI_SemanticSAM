@@ -17,7 +17,7 @@ from ComfyUI_SemanticSAM.semantic_sam.BaseModel import BaseModel
 from ComfyUI_SemanticSAM.semantic_sam import build_model
 from ComfyUI_SemanticSAM.tasks.automatic_mask_generator import SemanticSamAutomaticMaskGenerator
 from ComfyUI_SemanticSAM.tasks.interactive_idino_m2m_auto import show_anns
-from ComfyUI_SemanticSAM.tasks.interactive_predictor import SemanticSAMPredictor
+from ComfyUI_SemanticSAM.semantic_sam.predictor import SemanticSAMPredictor
 
 
 def prepare_image(image_pth):
