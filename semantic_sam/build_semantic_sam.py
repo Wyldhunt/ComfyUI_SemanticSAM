@@ -11,18 +11,33 @@ import numpy as np
 from torchvision import transforms
 import torch
 import os
+from typing import Optional, Union
 
 from ComfyUI_SemanticSAM.utils.arguments import load_opt_from_config_file
 from ComfyUI_SemanticSAM.semantic_sam.BaseModel import BaseModel
 from ComfyUI_SemanticSAM.semantic_sam import build_model
 from ComfyUI_SemanticSAM.tasks.automatic_mask_generator import SemanticSamAutomaticMaskGenerator
 from ComfyUI_SemanticSAM.tasks.interactive_idino_m2m_auto import show_anns
-from ComfyUI_SemanticSAM.tasks.interactive_predictor import SemanticSAMPredictor
+from ComfyUI_SemanticSAM.semantic_sam.predictor import SemanticSAMPredictor
 
 
-def prepare_image(image_pth):
-    """
-    apply transformation to the image. crop the image ot 640 short edge by default
+def prepare_image(
+    image_pth, device: Optional[Union[torch.device, str]] = None
+):
+    """Load an image from ``image_pth`` and return resized data tensors.
+
+    Parameters
+    ----------
+    image_pth:
+        Path to the source image on disk.
+    device:
+        Optional device specifier. ``None`` selects CUDA when available, otherwise CPU.
+
+    Returns
+    -------
+    tuple[np.ndarray, torch.Tensor]
+        A tuple ``(image_np, image_tensor)`` where ``image_np`` has shape ``(H, W, 3)``
+        and ``image_tensor`` has shape ``(3, H, W)`` located on ``device``.
     """
     image = Image.open(image_pth).convert('RGB')
     print(image.size)
@@ -32,12 +47,15 @@ def prepare_image(image_pth):
     image_ori = transform1(image)
 
     image_ori = np.asarray(image_ori)
-    images = torch.from_numpy(image_ori.copy()).permute(2, 0, 1).cuda()
+    resolved_device = _resolve_device(device)
+    images = torch.from_numpy(image_ori.copy()).permute(2, 0, 1).to(resolved_device)
 
     return image_ori, images
 
 
-def build_semantic_sam(model_type, ckpt):
+def build_semantic_sam(
+    model_type, ckpt, device: Optional[Union[torch.device, str]] = None
+):
     """
     build model
     """
@@ -50,8 +68,20 @@ def build_semantic_sam(model_type, ckpt):
 
     sam_cfg=cfgs[model_type]
     opt = load_opt_from_config_file(sam_cfg)
-    model_semantic_sam = BaseModel(opt, build_model(opt)).from_pretrained(ckpt).eval().cuda()
+    model_semantic_sam = BaseModel(opt, build_model(opt)).from_pretrained(ckpt).eval()
+    resolved_device = _resolve_device(device)
+    model_semantic_sam = model_semantic_sam.to(resolved_device)
     return model_semantic_sam
+
+
+def _resolve_device(device: Optional[Union[torch.device, str]]) -> torch.device:
+    """Resolve ``device`` to a concrete :class:`torch.device`."""
+
+    if device is None:
+        if torch.cuda.is_available():
+            return torch.device('cuda')
+        return torch.device('cpu')
+    return torch.device(device)
 
 
 def plot_results(outputs, image_ori, save_path='../vis/'):
