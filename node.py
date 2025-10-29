@@ -163,10 +163,6 @@ class PointPrompt:
 NumberLike = Union[int, float, str]
 
 
-def _to_int(value: Union[int, float]) -> int:
-    return int(round(float(value)))
-
-
 class StringToBBox:
     """Convert string-encoded bounding boxes to the BBOX type used in ComfyUI."""
 
@@ -194,14 +190,18 @@ class StringToBBox:
     RETURN_TYPES = ("BBOX",)
     FUNCTION = "convert"
 
-    def convert(self, bbox_string: str, bbox_format: str = "xywh") -> Tuple[List[Tuple[int, int, int, int]]]:
+    def convert(
+        self,
+        bbox_string: str,
+        bbox_format: str = "xywh",
+    ) -> Tuple[List[Tuple[float, float, float, float]]]:
         normalized_format = bbox_format.strip().lower()
         boxes = self._parse_bbox_string(bbox_string, normalized_format)
         if not boxes:
             raise ValueError("No bounding boxes could be parsed from the provided string.")
         return (boxes,)
 
-    def _parse_bbox_string(self, bbox_string: str, bbox_format: str) -> List[Tuple[int, int, int, int]]:
+    def _parse_bbox_string(self, bbox_string: str, bbox_format: str) -> List[Tuple[float, float, float, float]]:
         if bbox_format not in {"xywh", "xyxy"}:
             raise ValueError("bbox_format must be either 'xywh' or 'xyxy'.")
 
@@ -217,7 +217,7 @@ class StringToBBox:
 
         return self._parse_json_payload(data, bbox_format)
 
-    def _parse_json_payload(self, data: object, bbox_format: str) -> List[Tuple[int, int, int, int]]:
+    def _parse_json_payload(self, data: object, bbox_format: str) -> List[Tuple[float, float, float, float]]:
         if isinstance(data, dict):
             return [self._dict_to_bbox(data)]
         if isinstance(data, list):
@@ -225,7 +225,7 @@ class StringToBBox:
                 return []
             if all(isinstance(value, (int, float, str)) for value in data):
                 return [self._sequence_to_bbox(data, bbox_format)]
-            boxes: List[Tuple[int, int, int, int]] = []
+            boxes: List[Tuple[float, float, float, float]] = []
             for item in data:
                 if isinstance(item, (list, tuple)):
                     boxes.append(self._sequence_to_bbox(item, bbox_format))
@@ -256,7 +256,7 @@ class StringToBBox:
         self,
         sequence: Sequence[NumberLike],
         bbox_format: str,
-    ) -> Tuple[int, int, int, int]:
+    ) -> Tuple[float, float, float, float]:
         if len(sequence) != 4:
             raise ValueError("Bounding box sequences must contain exactly four values.")
 
@@ -274,9 +274,9 @@ class StringToBBox:
         if width < 0 or height < 0:
             raise ValueError("Bounding box width and height must be non-negative values.")
 
-        return (_to_int(x_min), _to_int(y_min), _to_int(width), _to_int(height))
+        return (x_min, y_min, width, height)
 
-    def _dict_to_bbox(self, data: Dict[str, NumberLike]) -> Tuple[int, int, int, int]:
+    def _dict_to_bbox(self, data: Dict[str, NumberLike]) -> Tuple[float, float, float, float]:
         lowered = {key.lower(): value for key, value in data.items()}
 
         key_sets = [
