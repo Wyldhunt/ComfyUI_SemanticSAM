@@ -391,12 +391,22 @@ class SemanticSAMSegment:
             for mask in sorted_masks
         ]
 
-        rgba_imgs, masks_tensor = masks2rgba(image[0], resized_masks)
-
         metadata: List[Dict[str, object]] = []
         if resized_masks:
             semantic_map, id2label = model.segmenter.predict_semantic(pil_image)
             metadata = assign_labels_to_sam_masks(semantic_map, id2label, resized_masks)
+
+            order = sorted(
+                range(len(resized_masks)),
+                key=lambda idx: metadata[idx].get("area", 0) if metadata[idx] else 0,
+                reverse=True,
+            )
+            if order and list(order) != list(range(len(resized_masks))):
+                resized_masks = [resized_masks[idx] for idx in order]
+                metadata = [metadata[idx] for idx in order]
+
+        rgba_imgs, masks_tensor = masks2rgba(image[0], resized_masks)
+
         model.last_metadata = metadata
         metadata_json = json.dumps(metadata, ensure_ascii=False)
 
