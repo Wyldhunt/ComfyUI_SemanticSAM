@@ -299,8 +299,9 @@ def masks2rgba(image: torch.Tensor, masks: List[np.ndarray]):
         alpha = mask_uint8.astype(np.float32)
         rgba = np.concatenate([color_mask, alpha[..., None]], axis=-1)
         batch.append(torch.from_numpy(rgba / 255.0).float())
-        mask_stack.append(torch.from_numpy(mask).unsqueeze(0).float())
+        mask_stack.append(torch.from_numpy(mask).float())
     if not batch:
-        empty = torch.zeros((1, *image.shape[:2], 4), dtype=torch.float32)
-        return empty, torch.zeros((1, 1, image.shape[0], image.shape[1]), dtype=torch.float32)
+        height, width = image.shape[0], image.shape[1]
+        empty = torch.zeros((0, height, width, 4), dtype=torch.float32)
+        return empty, torch.zeros((0, height, width), dtype=torch.float32)
     return torch.stack(batch), torch.stack(mask_stack)
