@@ -12,8 +12,8 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "SemanticSAMLoader": "Semantic SAM Model Loader",
     "SemanticSAMSegment": "Semantic SAM Segment",
-    "PointPrompt" : "Point Prompt"
+    "PointPrompt": "Point Prompt",
 }
 
 
-__all__ = ['NODE_CLASS_MAPPINGS', 'NODE_DISPLAY_NAME_MAPPINGS']
+__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
