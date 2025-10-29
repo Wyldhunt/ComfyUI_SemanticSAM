@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import cv2
 import numpy as np
@@ -43,7 +44,17 @@ def _resolve_checkpoint_path(path: str) -> str:
     if os.path.isabs(path):
         return path
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.abspath(os.path.join(base_dir, path))
+    normalized_path = path.replace("\\", "/")
+
+    if normalized_path.startswith("custom_nodes/"):
+        normalized_path = normalized_path.split("custom_nodes/", 1)[1]
+
+    module_dir_name = os.path.basename(base_dir)
+    if normalized_path.startswith(f"{module_dir_name}/"):
+        normalized_path = normalized_path.split(f"{module_dir_name}/", 1)[1]
+
+    candidate = os.path.join(base_dir, normalized_path)
+    return os.path.abspath(candidate)
 
 
 def list_sam_model() -> List[str]:
@@ -147,6 +158,149 @@ class PointPrompt:
 
     def main(self, x_coord: int, y_coord: int):
         return ([[x_coord, y_coord]],)
+
+
+NumberLike = Union[int, float, str]
+
+
+def _to_int(value: Union[int, float]) -> int:
+    return int(round(float(value)))
+
+
+class StringToBBox:
+    """Convert string-encoded bounding boxes to the BBOX type used in ComfyUI."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "bbox_string": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "tooltip": "Bounding box data as JSON, comma separated values, or newline separated values.",
+                    },
+                ),
+            },
+            "optional": {
+                "bbox_format": (
+                    ["xywh", "xyxy"],
+                    {"default": "xywh", "tooltip": "Format of the coordinates in the input string."},
+                ),
+            },
+        }
+
+    CATEGORY = "SemanticSAM/utility"
+    RETURN_TYPES = ("BBOX",)
+    FUNCTION = "convert"
+
+    def convert(self, bbox_string: str, bbox_format: str = "xywh") -> Tuple[List[Tuple[int, int, int, int]]]:
+        normalized_format = bbox_format.strip().lower()
+        boxes = self._parse_bbox_string(bbox_string, normalized_format)
+        if not boxes:
+            raise ValueError("No bounding boxes could be parsed from the provided string.")
+        return (boxes,)
+
+    def _parse_bbox_string(self, bbox_string: str, bbox_format: str) -> List[Tuple[int, int, int, int]]:
+        if bbox_format not in {"xywh", "xyxy"}:
+            raise ValueError("bbox_format must be either 'xywh' or 'xyxy'.")
+
+        bbox_string = bbox_string.strip()
+        if not bbox_string:
+            return []
+
+        try:
+            data = json.loads(bbox_string)
+        except json.JSONDecodeError:
+            sequences = self._parse_fallback_sequences(bbox_string)
+            return [self._sequence_to_bbox(seq, bbox_format) for seq in sequences]
+
+        return self._parse_json_payload(data, bbox_format)
+
+    def _parse_json_payload(self, data: object, bbox_format: str) -> List[Tuple[int, int, int, int]]:
+        if isinstance(data, dict):
+            return [self._dict_to_bbox(data)]
+        if isinstance(data, list):
+            if not data:
+                return []
+            if all(isinstance(value, (int, float, str)) for value in data):
+                return [self._sequence_to_bbox(data, bbox_format)]
+            boxes: List[Tuple[int, int, int, int]] = []
+            for item in data:
+                if isinstance(item, (list, tuple)):
+                    boxes.append(self._sequence_to_bbox(item, bbox_format))
+                elif isinstance(item, dict):
+                    boxes.append(self._dict_to_bbox(item))
+                else:
+                    raise TypeError(f"Unsupported element in bbox list: {type(item)!r}")
+            return boxes
+        raise TypeError(f"Unsupported data type for bbox payload: {type(data)!r}")
+
+    def _parse_fallback_sequences(self, bbox_string: str) -> List[List[NumberLike]]:
+        chunks = [chunk.strip() for chunk in re.split(r"[\n;]+", bbox_string) if chunk.strip()]
+        sequences: List[List[NumberLike]] = []
+        for chunk in chunks:
+            parts = [part for part in re.split(r"[,\s]+", chunk) if part]
+            if not parts:
+                continue
+            if len(parts) != 4:
+                raise ValueError(
+                    "Each bounding box must contain exactly four values when using comma or whitespace separated input.",
+                )
+            sequences.append(parts)
+        if not sequences and bbox_string:
+            raise ValueError("Unable to parse bounding box values from provided string.")
+        return sequences
+
+    def _sequence_to_bbox(
+        self,
+        sequence: Sequence[NumberLike],
+        bbox_format: str,
+    ) -> Tuple[int, int, int, int]:
+        if len(sequence) != 4:
+            raise ValueError("Bounding box sequences must contain exactly four values.")
+
+        values = [float(str(value).strip()) for value in sequence]
+
+        if bbox_format == "xyxy":
+            x_min, y_min, x_max, y_max = values
+            width = x_max - x_min
+            height = y_max - y_min
+        elif bbox_format == "xywh":
+            x_min, y_min, width, height = values
+        else:
+            raise ValueError(f"Unsupported bbox_format value: {bbox_format}")
+
+        if width < 0 or height < 0:
+            raise ValueError("Bounding box width and height must be non-negative values.")
+
+        return (_to_int(x_min), _to_int(y_min), _to_int(width), _to_int(height))
+
+    def _dict_to_bbox(self, data: Dict[str, NumberLike]) -> Tuple[int, int, int, int]:
+        lowered = {key.lower(): value for key, value in data.items()}
+
+        key_sets = [
+            ("x_min", "y_min", "width", "height"),
+            ("xmin", "ymin", "width", "height"),
+            ("x", "y", "width", "height"),
+            ("left", "top", "width", "height"),
+        ]
+        for keys in key_sets:
+            if all(key in lowered for key in keys):
+                sequence = [lowered[key] for key in keys]
+                return self._sequence_to_bbox(sequence, "xywh")
+
+        xyxy_key_sets = [
+            ("x_min", "y_min", "x_max", "y_max"),
+            ("xmin", "ymin", "xmax", "ymax"),
+            ("left", "top", "right", "bottom"),
+        ]
+        for keys in xyxy_key_sets:
+            if all(key in lowered for key in keys):
+                sequence = [lowered[key] for key in keys]
+                return self._sequence_to_bbox(sequence, "xyxy")
+
+        raise ValueError("Dictionary payload does not contain a recognizable bounding box format.")
 
 
 class SemanticSAMLoader:
@@ -253,12 +407,14 @@ NODE_CLASS_MAPPINGS = {
     "SemanticSAMLoader": SemanticSAMLoader,
     "SemanticSAMSegment": SemanticSAMSegment,
     "PointPrompt": PointPrompt,
+    "StringToBBox": StringToBBox,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "SemanticSAMLoader": "SemanticSAM Loader",
     "SemanticSAMSegment": "SemanticSAM Segment",
     "PointPrompt": "Point Prompt",
+    "StringToBBox": "String to BBOX",
 }
 
 
