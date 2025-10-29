@@ -44,7 +44,17 @@ def _resolve_checkpoint_path(path: str) -> str:
     if os.path.isabs(path):
         return path
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.abspath(os.path.join(base_dir, path))
+    normalized_path = path.replace("\\", "/")
+
+    if normalized_path.startswith("custom_nodes/"):
+        normalized_path = normalized_path.split("custom_nodes/", 1)[1]
+
+    module_dir_name = os.path.basename(base_dir)
+    if normalized_path.startswith(f"{module_dir_name}/"):
+        normalized_path = normalized_path.split(f"{module_dir_name}/", 1)[1]
+
+    candidate = os.path.join(base_dir, normalized_path)
+    return os.path.abspath(candidate)
 
 
 def list_sam_model() -> List[str]:
@@ -174,8 +184,8 @@ class StringToBBox:
             },
             "optional": {
                 "bbox_format": (
-                    ["auto", "xywh", "xyxy"],
-                    {"default": "auto", "tooltip": "Format of the coordinates in the input string."},
+                    ["xywh", "xyxy"],
+                    {"default": "xywh", "tooltip": "Format of the coordinates in the input string."},
                 ),
             },
         }
@@ -184,13 +194,17 @@ class StringToBBox:
     RETURN_TYPES = ("BBOX",)
     FUNCTION = "convert"
 
-    def convert(self, bbox_string: str, bbox_format: str = "auto") -> Tuple[List[Tuple[int, int, int, int]]]:
-        boxes = self._parse_bbox_string(bbox_string, bbox_format)
+    def convert(self, bbox_string: str, bbox_format: str = "xywh") -> Tuple[List[Tuple[int, int, int, int]]]:
+        normalized_format = bbox_format.strip().lower()
+        boxes = self._parse_bbox_string(bbox_string, normalized_format)
         if not boxes:
             raise ValueError("No bounding boxes could be parsed from the provided string.")
         return (boxes,)
 
     def _parse_bbox_string(self, bbox_string: str, bbox_format: str) -> List[Tuple[int, int, int, int]]:
+        if bbox_format not in {"xywh", "xyxy"}:
+            raise ValueError("bbox_format must be either 'xywh' or 'xyxy'.")
+
         bbox_string = bbox_string.strip()
         if not bbox_string:
             return []
@@ -247,15 +261,12 @@ class StringToBBox:
             raise ValueError("Bounding box sequences must contain exactly four values.")
 
         values = [float(str(value).strip()) for value in sequence]
-        inferred_format = bbox_format
-        if bbox_format == "auto":
-            inferred_format = "xyxy" if values[2] > values[0] and values[3] > values[1] else "xywh"
 
-        if inferred_format == "xyxy":
+        if bbox_format == "xyxy":
             x_min, y_min, x_max, y_max = values
             width = x_max - x_min
             height = y_max - y_min
-        elif inferred_format == "xywh":
+        elif bbox_format == "xywh":
             x_min, y_min, width, height = values
         else:
             raise ValueError(f"Unsupported bbox_format value: {bbox_format}")
@@ -396,12 +407,14 @@ NODE_CLASS_MAPPINGS = {
     "SemanticSAMLoader": SemanticSAMLoader,
     "SemanticSAMSegment": SemanticSAMSegment,
     "PointPrompt": PointPrompt,
+    "StringToBBox": StringToBBox,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "SemanticSAMLoader": "SemanticSAM Loader",
     "SemanticSAMSegment": "SemanticSAM Segment",
     "PointPrompt": "Point Prompt",
+    "StringToBBox": "String to BBOX",
 }
 
 
